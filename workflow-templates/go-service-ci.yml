@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  test:
+    name: Test & Build
+    uses: anvil-head/.github/.github/workflows/go-ci.yml@main
+    with:
+      go-version: '1.22'
+  
+  security:
+    name: Security Scan
+    uses: anvil-head/.github/.github/workflows/codeql.yml@main
+    with:
+      languages: 'go'
+  
+  docker:
+    name: Docker Build
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: anvil-head/.github/.github/workflows/docker-build.yml@main
+    with:
+      image-name: ghcr.io/${{ github.repository }}
+      push: false  # Set to true when ready to push
+    secrets: inherit

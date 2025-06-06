@@ -1,0 +1,132 @@
+name: Go CI
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to use'
+        required: false
+        default: '1.22'
+        type: string
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      run-integration-tests:
+        description: 'Run integration tests'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+          - 15672:15672
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+    
+    - name: Download dependencies
+      working-directory: ${{ inputs.working-directory }}
+      run: go mod download
+    
+    - name: Run go fmt
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -n "$(gofmt -s -l .)" ]; then
+          echo "Go code is not formatted:"
+          gofmt -s -d .
+          exit 1
+        fi
+    
+    - name: Run go vet
+      working-directory: ${{ inputs.working-directory }}
+      run: go vet ./...
+    
+    - name: Run staticcheck
+      uses: dominikh/staticcheck-action@v1
+      with:
+        version: "latest"
+        working-directory: ${{ inputs.working-directory }}
+    
+    - name: Run tests
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        go test -v -race -coverprofile=coverage.out ./...
+        go tool cover -html=coverage.out -o coverage.html
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable
+        RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+    
+    - name: Run integration tests
+      if: ${{ inputs.run-integration-tests }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -d "tests/integration" ]; then
+          go test -v -tags=integration ./tests/integration/...
+        fi
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable
+        RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+    
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: ${{ inputs.working-directory }}/coverage.html
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+    
+    - name: Build
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app ./cmd/...
+    
+    - name: Upload binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-binary
+        path: ${{ inputs.working-directory }}/app

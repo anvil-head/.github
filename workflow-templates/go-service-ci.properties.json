@@ -1,0 +1,13 @@
+{
+  "name": "Go Service CI/CD",
+  "description": "Standard CI/CD pipeline for Go microservices with testing, security scanning, and Docker builds",
+  "iconName": "go",
+  "categories": [
+    "Go",
+    "Dockerfile"
+  ],
+  "filePatterns": [
+    "go.mod$",
+    "Dockerfile$"
+  ]
+}
